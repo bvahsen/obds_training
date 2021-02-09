@@ -1,0 +1,64 @@
+# -*- coding: utf-8 -*-
+"""
+Spyder Editor
+
+This is a temporary script file.
+"""
+
+a = 5 
+course = "obds"
+new_script = True
+
+#first exercise
+print('a')
+print ('course')
+print ('new_script')
+
+        
+#second exercise (two ways)
+a = 1
+while a < 11:
+    print (a)
+    a += 1
+    
+x = 1
+below_11 = True
+while below_11:
+    print(x)
+    x = x + 1
+    if x == 11:
+        below_11 = False
+    else:
+        continue
+    
+    
+#third exercise
+for number in range (-10,-0):
+    print (number)
+    
+    
+#fourth exercise
+num = int(input('Enter an integer : '))
+sum = 0
+for num in range (1, num+1):
+    sum = sum + num
+print ('Sum of first', num, 'number is', sum)
+
+
+#fourth exercise (different way)
+guess = int(input('Enter an integer : '))
+number = 0
+sum = 0
+while number < guess:
+    number = number + 1
+    sum = sum + number
+print(sum)
+
+#my try
+guess = int(input('Enter an integer : '))
+result = 0
+for guess in range (0, guess+1):
+    result = result + guess
+print(result)
+
+
