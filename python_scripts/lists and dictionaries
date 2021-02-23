@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Jan 26 09:41:11 2021
+
+@author: Bjorn1
+
+1) Create a list containing the of the names of your fellow trainees
+2) Add the names of today's trainers to the list using append
+3) Select the 3rd and 5th names from your list
+4) Sort your list & select the 3rd to the 5th names from your list
+5) Select the first 2 letters of the string in the third value of your list
+6) Iterate over the list and set the names to keys in a dictionary with the value as 'participant’ or
+‘trainer’ as appropriate
+7) Use a for loop to iterate over your dictionary and print the values of the keys only if they are
+participants
+
+
+"""
+
+#1 exercise 
+participants = ['Alina', 'Ahmed', 'Aneesha', 'Amjad', 'Bjorn', 'Carla', 'Ian', 'Jian', 'Niamh', 'Paul']
+print(participants)
+
+#2 exercise 
+participants.append('Charlie')
+participants.append('David')
+print('My list is now', participants)
+
+#2 exercise - alternative way
+trainers = ['Charlie', 'David']
+course = participants + trainers
+print(course)
+
+#3 exercise 
+print(participants[2])
+print(participants[4])
+
+#4 exercise 
+course.sort()
+print(course)
+print(course[2])
+print(course[4])
+
+#5 exercise - 0:2 takes letters 0 and 1 from the name
+print(course[2][0:2])
+
+#6 exercise
+coursedict = {}
+for people in course:
+    coursedict[people] = 'participant'
+    coursedict['Charlie'] = 'trainer'
+    coursedict['David'] = 'trainer'
+print(coursedict)
+    
+#7 exercise
+for people, status in coursedict.items():
+    if status == 'participant':
+        print(people)
+    

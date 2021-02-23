@@ -6,9 +6,13 @@ Created on Mon Jan 25 14:09:06 2021
 
 @author: Bjorn1
 """
+
+import sys
+import math
+
 #Exercise1
 def complement_base(base):
-    output = None
+    output = ''
     if base == "A":
         output = "T"
     elif base == "G":
@@ -21,15 +25,6 @@ def complement_base(base):
         output = "*"
     return output
 
-def reverse_complement(seq):
-    rev_seq = ''
-    for base in reverse_string(seq):
-        rev_seq += complement_base(base)
-    return rev_seq
-        
-  
-
-        
 #Exercise 2 - Write a function to reverse a string, this is the same (custom-made) as putting reversed(seq)
 def reverse_string(sequ):
     last_position = len(sequ) - 1
@@ -38,20 +33,15 @@ def reverse_string(sequ):
         output += sequ[i]
     return output
 
-
-reverse_complement("AAAATTXTTTTT")      
-
+def reverse_complement(seq):
+    rev_seq = ''
+    for base in reverse_string(seq):
+        rev_seq += complement_base(base)
+    return rev_seq
+  
 #Exercise 3
-
-
-
-
-
-
-
-
-
-
-
-
-
+def main():
+    seq = input('Enter a sequence : ')
+    result = reverse_complement(seq) 
+    print(result)
+main ()
