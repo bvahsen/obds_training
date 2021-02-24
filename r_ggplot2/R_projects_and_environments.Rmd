@@ -1,0 +1,148 @@
+---
+title: "R_projects_and_environments"
+author: "Bjorn"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load the ggplot2 package and plot the whole dataset without any details
+```{r}
+library(ggplot2)
+ggplot(diamonds)
+#this doesn't work because we didn't provide anything
+```
+```{r}
+ggplot(diamonds, aes(x = carat, y = price))
+#this doesn't work because we provided the x- and y-axis, but we didn't specify the dataset
+```
+Draw points showing carat on the x-axis and price on the y-axis.
+```{r}
+ggplot(diamonds, aes(x = carat, y = price)) + geom_point()
+```
+Color data points by cut.
+```{r}
+ggplot(diamonds, aes(x = carat, y = price, color = cut)) + geom_point()
+```
+Add a smoothed mean trend line. color = cit now has to go into the geom_point, then the color = cut will not be used globally but rather specifically for the geom_point.
+```{r}
+ggplot(diamonds, aes(x = carat, y = price)) + geom_point(aes(color = cut)) + geom_smooth()
+```
+
+Now this is 
+
+Plot a histogram of chick weight.
+```{r}
+ggplot(ChickWeight, aes(x = weight)) + 
+    geom_histogram() 
+```
+Change the fill and border color of the bars.
+```{r}
+ggplot(ChickWeight, aes(x = weight)) + 
+    geom_histogram(fill = "grey", color = "black") 
+```
+Change the number of bins (i.e.,bars).
+```{r}
+ggplot(ChickWeight, aes(x = weight)) + 
+    geom_histogram(fill = "grey", color = "black", bins = 50) 
+```
+Note: you may change the bin width or the total number of bars.
+```{r}
+ggplot(ChickWeight, aes(x = weight)) + 
+    geom_histogram(fill = "grey", color = "black", binwidth = 5) 
+```
+Change the label and font size of the axes.
+```{r}
+ggplot(ChickWeight, aes(x = weight)) + 
+    geom_histogram(fill = "grey", color = "black", binwidth = 5) +
+    labs(x = "Chick weight", y = "Number of chicks", title = "Histogram of chick weight", subtitle = "chick weight dataset")
+```
+Change the font size of the x-axis tick labels.
+```{r}
+ggplot(ChickWeight, aes(x = weight)) + 
+    geom_histogram(fill = "grey", color = "black", binwidth = 5) +
+    labs(x = "Chick weight", y = "Number of chicks", title = "Histogram of chick weight", subtitle = "chick weight dataset") +
+    theme(axis.title = element_text(size = 16, face = "bold"))
+```
+Change the angle of the x-axis tick labels. Note: you will probably want to justify the text labels as right-aligned.
+```{r}
+ggplot(ChickWeight, aes(x = weight)) + 
+    geom_histogram(fill = "grey", color = "black", binwidth = 5) +
+    labs(x = "Chick weight", y = "Number of chicks", title = "Histogram of chick weight", subtitle = "chick weight dataset") +
+    theme(axis.title = element_text(size = 16, face = "bold"), axis.text.x = element_text(size = 14, angle = 30, hjust = 1, color = "green"))
+```
+Change the y-axis upper limit to an arbitrary number, e.g. 100.
+```{r}
+ggplot(ChickWeight, aes(x = weight)) + 
+    geom_histogram(fill = "grey", color = "black", binwidth = 5) +
+    labs(x = "Chick weight", y = "Number of chicks", title = "Histogram of chick weight", subtitle = "chick weight dataset") +
+    theme(axis.title = element_text(size = 16, face = "bold"), axis.text.x = element_text(size = 14, angle = 30, hjust = 1, color = "green")) +
+    ylim(0, 100)
+```
+Facet a vertical strip of histograms, one for each diet.
+```{r}
+ggplot(ChickWeight, aes(x = weight)) + 
+    geom_histogram(fill = "grey", color = "black", binwidth = 5) +
+    labs(x = "Chick weight", y = "Number of chicks", title = "Histogram of chick weight", subtitle = "chick weight dataset") +
+    theme(axis.title = element_text(size = 16, face = "bold"), axis.text.x = element_text(size = 14, angle = 30, hjust = 1, color = "green")) +
+    ylim(0, 25) +
+    facet_wrap(~Diet, ncol = 1)
+```
+Note: you may also like to  ll bars with a different color for each diet.
+```{r}
+ggplot(ChickWeight, aes(x = weight, fill = Diet)) + 
+    geom_histogram(color = "black", binwidth = 5) +
+    labs(x = "Chick weight", y = "Number of chicks", title = "Histogram of chick weight", subtitle = "chick weight dataset") +
+    theme(axis.title = element_text(size = 16, face = "bold"), axis.text.x = element_text(size = 14, angle = 30, hjust = 1, color = "green")) +
+    facet_wrap(~Diet, ncol = 1)
+```
+Allow each facet to  t the y-axis range to its own data.
+```{r}
+ggplot(ChickWeight, aes(x = weight, fill = Diet)) + 
+    geom_histogram(color = "black", binwidth = 5) +
+    labs(x = "Chick weight", y = "Number of chicks", title = "Histogram of chick weight", subtitle = "chick weight dataset") +
+    theme(axis.title = element_text(size = 16, face = "bold"), axis.text.x = element_text(size = 14, angle = 30, hjust = 1, color = "green")) +
+    facet_wrap(~Diet, ncol = 1, scales = "free_y")
+```
+3rd big exercise of the day
+Using the ChickWeight data set
+
+Create a scatter plot of weight (y-axis) over time (x-axis).
+```{r}
+ggplot(ChickWeight, aes(y = weight, x = Time)) + 
+    geom_point()
+```
+Color by diet.
+```{r}
+ggplot(ChickWeight, aes(y = weight, x = Time, colour = Diet)) + 
+    geom_point() 
+```
+Add a linear mean trend line for each diet. Which diet leads to the highest mean increase in weight?
+```{r}
+ggplot(ChickWeight, aes(y = weight, x = Time, colour = Diet)) + 
+    geom_point() +
+    geom_smooth(method=lm)
+#number 3 is giving the highest increase
+```
+Collate that last plot with the last histogram in the previous exercise. Label the panels "A" and "B".
+```{r}
+plot_A <- ggplot(ChickWeight, aes(x = weight, fill = Diet)) + 
+    geom_histogram(color = "black", binwidth = 5) +
+    labs(x = "Chick weight", y = "Number of chicks", title = "Histogram of chick weight", subtitle = "chick weight dataset") +
+    theme(axis.title = element_text(size = 16, face = "bold"), axis.text.x = element_text(size = 14, angle = 30, hjust = 1, color = "green")) +
+    facet_wrap(~Diet, ncol = 1, scales = "free_y")
+
+plot_B <- ggplot(ChickWeight, aes(y = weight, x = Time, colour = Diet)) + 
+    geom_point() +
+    geom_smooth(method=lm)
+
+library(cowplot)
+plot_grid(plot_A, plot_B, labels = c('A', 'B'), ncol = 2, nrow = 1)
+```
+
+
+
+
+
