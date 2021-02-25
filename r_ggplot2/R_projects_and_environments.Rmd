@@ -141,6 +141,15 @@ plot_B <- ggplot(ChickWeight, aes(y = weight, x = Time, colour = Diet)) +
 library(cowplot)
 plot_grid(plot_A, plot_B, labels = c('A', 'B'), ncol = 2, nrow = 1)
 ```
+Addon: if we want to change the colour of each individual diet, we can first define a vector with the numbers of diets (1-4) assigned to specific colours. 
+This doesn't need to be in the right orderd, as we see below.
+```{r}
+diet_colours <- c("1" = "blue", "4" = "red", "3" = "green", "2" = "orange")
+ggplot(ChickWeight, aes(y = weight, x = Time, colour = Diet)) + 
+    geom_point() +
+    geom_smooth(method=lm) +
+    scale_color_manual(values = diet_colours)
+```
 
 
 

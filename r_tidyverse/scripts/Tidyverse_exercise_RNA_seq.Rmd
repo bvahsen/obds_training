@@ -1,0 +1,202 @@
+---
+title: "Tidyverse"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE}
+#This is just an example that if we put echo=FALSE this means for this code chunk the code will not be printed in the report
+
+```
+Activate tidyverse first.
+```{r}
+library(tidyverse)
+```
+
+Now read in the files. The table is genes (rows) by samples (columns), which we used earlier in the python part.
+```{r}
+getwd()
+counts_table <- read_tsv("../data/obds_countstable.tsv.gz")
+```
+
+Now we read in the samples table. This is giving us info about the mice that were used in this experiment.
+```{r}
+getwd()
+sample_table <- read_tsv("../data/obds_sampletable.tsv")
+```
+
+No we will tidy the data. We want to keep all the Geneids, and have the following columns: samples and count 
+```{r}
+counts_table_tidy <- counts_table %>% 
+    pivot_longer(-Geneid, names_to = "samples", values_to = "count")
+```
+
+Join with gene info to get mgi_symbol. Use the biomaRt package. This will replace the ENSEMBL id with an actual gene name
+```{r}
+library(biomaRt)
+ensembl <- useMart("ensembl")
+#you can then search the dataset for the correct dataset we need (in this instance mus musculus)
+listDatasets(ensembl)
+#now that we have found the dataset, we'll use it: mmusculus_gene_ensembl, so we don't need to laod the whole thing but just the mouse bit
+ensembl <-  useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+#now we want to access the list of ensembleIDs for our geneIDs
+#we can search ensemble for the list of available attributes, which will match the ensemble gene ID with the gene name
+attributes = listAttributes(ensembl)
+#we have found what we want: mgi_symbol gives the gene name
+#the function we can use to apply this on our datatable now is getBM()
+#we can check the list of available filters for it using this:
+listFilters(ensembl)
+#ensemble_gene_id is what we want in this case
+#we now run it - the input for this are our actual geneids found in counts_table$Geneid, looking for the gene names (mgi_symbol) that corresponds to the ensembl_gene_id; we use counts_table and not counts_table_tidy here, because it will just have one row per gene symbol
+gene_names <- getBM(c("ensembl_gene_id", "mgi_symbol"), filters = "ensembl_gene_id", values = counts_table$Geneid, mart = ensembl)
+#this gives us a match of the Ensemble gene symbols and the gene names as a table
+
+```
+
+First we should make sure that there is only one gene name per gene ID (there could be duplicates in the ensemble_gene_IDS)
+```{r}
+#first we'll check the length of the table for unique gene_Ids in the table
+length(unique(gene_names$ensembl_gene_id))
+#we can compare this with the nomber of rows
+nrow(gene_names)
+#the result is 21838 for both, so there are no duplicates and we can thus proceed with the joining of the tables
+```
+
+Now we want to join the counts_table_tidy with gene_names.
+```{r}
+#cave: we have different names for the Geneid in both tables, so we need to specify this
+counts_table_tidy <- counts_table_tidy %>% left_join(gene_names, by = c("Geneid" = "ensembl_gene_id"))
+```
+
+Are there any unnamed genes?
+```{r}
+sum(is.na(counts_table_tidy$mgi_symbol))/12
+#we look for na (no result) in the mgi_symbols and divide the result by 12 (because we have 12 different samples)
+#the result means that we have 163 Geneids that didn't find a match in the gene names
+```
+
+Tidy metadata file. One variable per column. Don't need species and library_layout columns.
+```{r}
+# #first we will split the sample_title column into four different subcolumns based on "_"
+# sample_table <- sample_table %>% separate(sample_title, c("gene_name", "gene_condition", "cell_type", "replicate_number"), sep = "_")
+# #now we want to remerge gene_name and gene_condition
+# sample_table <- sample_table %>% unite(col = "genotype", gene_name, gene_condition, sep = "_")
+# #now we can get rid of the species and library_layout columns
+# sample_table <- sample_table %>% dplyr::select(-species, -library_layout)
+
+```
+
+We can also run this chunk as one command by piping all of it together.
+```{r}
+sample_table <- sample_table %>% separate(sample_title, c("gene_name", "gene_condition", "cell_type", "replicate_number"), sep = "_") %>% unite(col = "genotype", gene_name, gene_condition, sep = "_") %>% dplyr::select(-species, -library_layout)
+```
+
+Add metadata to table with counts and gene info
+```{r}
+counts_table_tidy <- counts_table_tidy %>% left_join(sample_table, by = c("samples" = "Sample_accession"))
+```
+
+Calculate counts per million (CPM).
+We want to calculate the number of counts for each transcript per million normalised to the total read count (to control for differences in the total read count)
+```{r}
+counts_table_tidy <- counts_table_tidy %>% mutate(CPM = count * 1000000/read_count)
+```
+
+Also calculate log2(CPM + 1)
+```{r}
+counts_table_tidy <- counts_table_tidy %>% mutate(log_transformed = log2(CPM + 1))
+```
+
+To make it a bit harder (for practise), we'll now delete the read_counts, CPM, log_transformed columns and then make them again using group_by() and summarise() to get them again.
+```{r}
+counts_table_tidy <- counts_table_tidy %>% dplyr::select(Geneid:replicate_number)
+```
+
+Now we'll calculate the total counts per sample ourselves using group_by
+```{r}
+counts_table_tidy <- counts_table_tidy %>% group_by(samples) %>% mutate(total_counts = sum(count))
+
+#check if there are 12 unique counts (indicating that there are 12 different samples)
+length(unique(counts_table_tidy$total_counts))
+#yes, that is correct
+```
+
+Now we will calculate the CPM and the log2_CPM again using our new total_counts column (same as above but total_counts instead of read_count)
+```{r}
+counts_table_tidy <- counts_table_tidy %>% mutate(CPM = count * 1000000/total_counts)
+
+counts_table_tidy <- counts_table_tidy %>% mutate(log_transformed = log2(CPM + 1))
+```
+
+Now we want to plot with ggplot using geom_col(). This time we use summarise because we just want one value for the total counts per sample 
+(rather than mutate which will keep the duplicates). 
+Edit the appearance of the plot to make it easier to read/"prettier". 
+How does the library size compare across the samples?
+```{r}
+#We first create a plotting table that we then use for the actual plotting
+plotting_table <- counts_table_tidy %>% group_by(samples) %>% summarise(total_counts = sum(count))
+
+#if we have x and y information, we use geom_col for the plotting
+plot1 <- ggplot(plotting_table, aes(x = samples, y = total_counts, col = samples)) + 
+  geom_col() +
+  theme(axis.title = element_text(size = 8, face = "bold"), axis.text.x = element_text(size = 8, angle = 30, hjust = 1, colour = "green"))
+plot1
+```
+How many genes have no counts for any sample?
+
+```{r}
+#We first group by gene(i.e. Geneid), then use filter to only use the ones that have 0 counts per gene, and then quantify this number above all rows using tally
+temp <- counts_table_tidy %>% group_by(Geneid) %>% summarise(total_counts_per_gene = sum(count)) %>%
+  filter(total_counts_per_gene == 0) %>% tally()
+temp
+```
+Draw a density plot of log2(CPM + 1) for all genes
+```{r}
+plot2 <- ggplot(counts_table_tidy, aes(x = log_transformed, colour = samples)) + 
+  geom_density() +
+  theme(axis.text.x = element_text(size = 8, angle = 30, hjust = 1, colour = "green"))
+plot2
+```
+
+Filter out genes that have low expression in 3 or fewer samples.
+For low expression use CPM < 0.5.
+Pull is similar to the $, so it will extract a specific column.
+```{r}
+genes_to_keep <- counts_table_tidy %>% 
+  group_by(Geneid) %>% 
+  filter(CPM >= 0.5) %>% 
+  tally() %>% 
+  filter(n > 3) %>% 
+  pull(Geneid)
+genes_to_keep 
+#this gives us the number of genes that we want to keep
+```
+
+So if we actually want to filter it out, we can use the previously generated vector to filter out the genes that we don't want:
+```{r}
+filtered_counts_table <- counts_table_tidy %>% 
+  filter(Geneid %in% genes_to_keep)
+nrow(filtered_counts_table)
+nrow(counts_table_tidy)
+```
+A different (and easier) version would be:
+```{r}
+filtered_counts_table <- counts_table_tidy %>% 
+  group_by(Geneid) %>% 
+  filter(sum(CPM >= 0.5) > 3)
+#sum(CPM >= 0.5 gives the number of cases for a logical vector of True and False for each sample, e.g. if this is true in all 12 samples it will be 12, if it is true in 3 samples it will give 3 and so on
+nrow(filtered_counts_table)
+```
+Lastly, we want to make a density plot of log2(CPM + 1) with the filtered data
+```{r}
+plot3 <- ggplot(filtered_counts_table, aes(x = log_transformed, colour = samples)) + 
+  geom_density() +
+  theme(axis.text.x = element_text(size = 8, angle = 30, hjust = 1, colour = "green"))
+plot3
+#comparing this with plot2, most genes have proper expression now (except for the first peak, so it might be useful to filter out this peak too)
+```
+
+21

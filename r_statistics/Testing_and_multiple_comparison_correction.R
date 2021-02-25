@@ -59,6 +59,18 @@ rowselect
 p_values <- vapply(rowselect, test_row, FUN.VALUE = numeric(1), matrix = data.logc) 
 p_values
 
-#2visualise a bar plot of the p-values
+#2Visualise a bar plot of the p-values
+hist(p_values)
+
+#3Correct p-values for multiple testing. How many genes remain before and after multiple testing?
+p_adjusted <- p.adjust(p_values, method = "BY")
+hist(p_adjusted)
+
+plot(p_values, p_adjusted)
+abline(a = 0, b = 1)
+abline(a = 0.05, b = 0)
+abline(v = 0.05)
+
+#4Use gene_metadata.csv to get the gene name for the gene identi􀃘er associated with the smallest pvalue.
 
 
