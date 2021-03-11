@@ -206,6 +206,8 @@ DefaultAssay(pbmc.integrated)
 
 #we use the MAST method
 library(MAST)
+#this calculates the expression for one cluster versus the average of all other clusters, doing this for every single cluster
+#so IL32 logFC -2.82 in cluster 0 means that it is significantly lower in cluster 0 compared to the average of the others
 FindAllMarkers(pbmc.integrated, test.use = "MAST", latent.vars = "orig.ident")
 
 ```
