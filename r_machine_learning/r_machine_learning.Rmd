@@ -1,0 +1,66 @@
+---
+title: "r_machine_learning (after Medi-Learn)"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caret)
+```
+
+```{r}
+data(iris)
+View(iris)
+```
+Get familiar with the data set. What are rows? What are columns?
+
+Use the caret::featurePlot() function to visualise species and measurements. Try the different options for the plot argument.
+```{r}
+caret::featurePlot(x=iris[,1:4],y=iris$Species, plot='density', auto.key = list(columns = 3))
+```
+Partition the data set into one training and one test set. Make sure the two sets are balanced with respect to Species.
+```{r}
+set.seed(998)
+inTraining <- createDataPartition(iris$Species, p = .75, list = FALSE)
+#now we assign the ones we want to keep to the training dataset
+training <- iris[ inTraining,]
+#now we assign the ones we want to keep to have in the testing dataset
+testing <- iris[-inTraining,]
+
+#you can check that there is even split between training and testing dataset using table()
+table(training$Species)
+```
+
+```{r}
+#Now we want to train the model
+fitControl <- trainControl(method = "boot", number = 5) ## repeated 5 times
+```
+
+```{r}
+View(modelLookup())
+```
+
+
+```{r}
+knnFit <- train(Species ~ ., data = training, method = "knn", trControl = fitControl, tuneGrid = data.frame(k = c(1,2,5,10,20)))
+ggplot(knnFit)
+```
+
+```{r}
+GPRFit <- train(Species ~ ., data = training, method = "gaussprLinear", trControl = fitControl)
+ggplot(GPRFit)
+```
+
+```{r}
+iris_svmLinear_Fit <- train(Species ~ ., data = training, method = 'svmLinear', trControl = fitControl, tuneGrid = data.frame(C = c(0.5, 1, 1.5, 2.5 )))
+```
+
+
+```{r}
+modelLookup('avNnet')
+avNNetFit <- train(x = irisTrain[, 1:4], y = irisTrain[, 5], method = 'avNNet', tuneGrid = expand.grid(size = c(1,2,5), decay = c(0.1, 0.5, 1), bag = c(10,20,50)))
+```
+

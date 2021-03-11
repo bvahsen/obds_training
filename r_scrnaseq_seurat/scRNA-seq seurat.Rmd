@@ -1,0 +1,177 @@
+---
+title: "seurat scRNAseq"
+author: "Bjorn"
+date: "08/03/2021"
+output: html_document
+###Analyse RNA and protein data using Seurat vignettes – QC, normalisation and scaling, dimensionality reduction, clustering###
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+We have three files - barcodes, features = genes and proteins measured by CITE-seq, matrix = counts for all of the genes and proteins
+These files have gone through the BCL and mapping step, as well as correction for sequencing erros and calling bar codes (steps 1-4 on slide 11 of the slides)
+
+First we want to read in the data. We will combine two tutorials on the Seurat website ("PBMC 3K guided tutorial" and "Using Seurat with multi-modal data")
+```{r}
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+```
+
+Now we want to read in the data. For this, we can use the special Read10x function.
+```{r}
+pbmc.data <- Read10X(data.dir = "filtered_feature_bc_matrix")
+names(pbmc.data)
+#names tells us that the list contains "Gene Expression" and "Antibody Capture"
+```
+
+
+```{r}
+#we will create a Surat Object with Gene expression first from pbmc.data and then add in the antibody capture
+#min.cells and min.features is used to perform a first filtering step, but we dont want it here because otherwise there will be issues with the crosscomparison with the protein data
+#we first add the default assay, which is RNA
+pbmc <- CreateSeuratObject(counts = pbmc.data[["Gene Expression"]], project = "pbmc")
+pbmc
+```
+
+Now we want to add in the protein data
+```{r}
+#we first create an assay object that contains the Antibody Capture data, then add this as another assay to the pbmc
+adt_assay <- CreateAssayObject(counts = pbmc.data[["Antibody Capture"]])
+pbmc[["ADT"]] <- adt_assay
+Assays(pbmc)
+#in a Seurat object, the counts object is the raw data, the data object is the normalised data
+
+```
+
+We can check out the object using str()
+```{r}
+str(pbmc)
+```
+
+We now test different Seurat commands to get a better understanding of what's going on
+```{r}
+data_RNA <- FetchData(pbmc, vars = 'ident', slot = "data")
+class(data_RNA)
+head(data_RNA)
+View(pbmc[[]]) #the [[]] are used to access the metadata for the Seurat object pbmc, here you can also see the identity of the cells in the ident column
+```
+We can now start QC'ing. 
+```{r}
+#the following command looks for mitochondrial genes (all genes starting with MT-), which we want to get rid of, it gives the percentage of it
+pbmc[["percent.mt"]] <- PercentageFeatureSet(pbmc, pattern = "^MT-")
+View(pbmc[[]])
+```
+
+
+```{r}
+#Feature_RNA is the total number of genes expressed in each cell
+#nCount_Rna is the number of counts per RNA
+VlnPlot(pbmc, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+#to have a better reference as to how to set thresholds later, we can plot just one graph and then add in a line, combine = TRUE is required to combine it with ggplot, which then allows us to plot a horizontal line
+plota <- VlnPlot(pbmc, features = c("nFeature_RNA"), combine = TRUE) +
+    geom_hline(yintercept = c(1000, 5000))
+plota
+
+#now we can do the same with the mitochondrial content
+plotb <- VlnPlot(pbmc, features = c("percent.mt"), ncol = 3) +
+    geom_hline(yintercept = 15)
+plotb
+```
+
+We now also want to do this: a QC plot of nCount_RNA by nFeature_RNA coloured by percent.mt (use ggplot2)
+
+```{r}
+plot1 <- FeatureScatter(pbmc, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(pbmc, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot3 <- ggplot(pbmc[[]], aes(x = nCount_RNA, y = nFeature_RNA, colour = percent.mt)) + 
+    geom_point()
+plot1 + plot2 + plot3
+#plot3 tells us that the cells with low number of genes expressed have high mitochondrial content
+```
+
+Just so we remember for filtering later, we can now decide on thresholds that we find reasonable
+nFeatures > 1000 and nFeatures < 5000, percent.mt < 15)
+
+Now we want to normalise, find variable features, and scale it using sctransform (three steps in one go)
+```{r}
+pbmc <- SCTransform(pbmc, vars.to.regress = "percent.mt", verbose = FALSE)
+View(pbmc)
+#the warning that you get is normal
+#the normalized data will then be stored in a new assay called SCT 
+```
+
+We then want to do the clustering and we'll start with PCA.
+```{r}
+DefaultAssay(pbmc)
+#this tells us that any functions are now by default run on the normalised/transformed (all the good stuff) data
+pbmc <- RunPCA(pbmc, pncs = 50)
+#NB: A higher number of pncs (principal components) might be necessary for neurons as they are usually highly diverse
+```
+
+Now we can visualise the PCA results. 
+```{r}
+VizDimLoadings(pbmc, dims = 1:2, reduction = "pca")
+DimPlot(pbmc, reduction = "pca")
+```
+
+```{r}
+ElbowPlot(pbmc, ndims = 50)
+#this can be used to see if a further increase in PCs still has an effect
+#it tells us that more than 20 does not seem to have a big effect any more
+```
+Now we want to cluster the cells, we will use 20 dims, as we decided on 20 PCs before (using the elbow plot). We can then visualise the clusters using UMAP and tSNE
+```{r}
+pbmc <- FindNeighbors(pbmc, dims = 1:20, k.param = 20)
+pbmc <- FindClusters(pbmc, resolution = 0.5)
+```
+
+We now want to run UMAP and tSNE. We use the same dimensions (20) that we used before.
+```{r}
+pbmc <- RunUMAP(pbmc, dims = 1:20)
+
+DimPlot(pbmc, reduction = "umap", label = TRUE)
+
+FeaturePlot(pbmc, features = c("MS4A1", "GNLY", "CD3E", "CD14", "FCER1A", "FCGR3A", "LYZ", "PPBP", 
+    "CD8A")) 
+```
+We want to generate a new plot that shows mitochondrial expression
+```{r}
+FeaturePlot(pbmc, features = "percent.mt") 
+FeaturePlot(pbmc, features = "nFeature_RNA", max.cutoff = 5000, min.cutoff = 1000) 
+FeaturePlot(pbmc, features = "nFeature_RNA") 
+
+head(WhichCells(pbmc, expression = percent.mt < 10))
+
+#we can use DimPlot to highlight all the cells that have less than 15% mitochondrial reads
+DimPlot(pbmc, cells.highlight = WhichCells(pbmc, expression = percent.mt < 15)) + NoLegend()
+#the grey area indicates the area that we don't want
+
+```
+We can subset the seurat object, and remove clusters 1 and 10
+```{r}
+#We can use idents to get ridm of clusters we don't want to keep
+pbmc_subset <- subset(pbmc, idents = c("1", "10"), invert = TRUE)
+
+DimPlot(pbmc_subset) 
+#we can now also check nFeature_RNA <1000 and >5000, to see if we should remove those
+DimPlot(pbmc_subset, cells.highlight = WhichCells(pbmc_subset, expression = nFeature_RNA < 1000)) + NoLegend()
+
+DimPlot(pbmc_subset, cells.highlight = WhichCells(pbmc_subset, expression = nFeature_RNA > 5000)) + NoLegend()
+#nFeature_RNA <1000 and >5000 doesn't make a big difference any more, having removed clusters with high mitochondrial percentage
+```
+We then rerun many steps from before, using the subset pbmc object, after removing clusters 0 and 10
+```{r}
+pbmc_subset <- SCTransform(pbmc_subset, vars.to.regress = "percent.mt", verbose = FALSE)
+pbmc_subset <- RunPCA(pbmc_subset, pncs = 50)
+pbmc_subset <- FindNeighbors(pbmc_subset, dims = 1:20, k.param = 20)
+pbmc_subset <- FindClusters(pbmc_subset, resolution = 0.5)
+pbmc_subset <- RunUMAP(pbmc_subset, dims = 1:20)
+DimPlot(pbmc_subset, reduction = "umap", label = TRUE)
+FeaturePlot(pbmc, features = c("MS4A1", "GNLY", "CD3E", "CD14", "FCER1A", "FCGR3A", "LYZ", "PPBP", 
+    "CD8A")) 
+```
+

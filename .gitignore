@@ -7,3 +7,9 @@
 *.bam
 *.bed
 *.bed.gz
+*.gz
+*.tsv
+*.html
+*.log
+*.rds
+*.tiff

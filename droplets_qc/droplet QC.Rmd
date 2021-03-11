@@ -1,0 +1,114 @@
+---
+title: "qc droplets"
+author: "Bjorn"
+date: "10/03/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Import the raw Cell Ranger matrix for 1,000 cells into R; use DropletUtils.
+```{r}
+library(DropletUtils)
+sce <- read10xCounts("data/pbmc_1k_v3_raw", sample.names = "PBMC")
+sce
+
+View(as.data.frame(colData(sce)))
+```
+
+Remove droplets without any count at all.
+```{r}
+#we first sum for each column (=cells) to see which cell has 0 coints
+sums <- colSums(assay(sce, 'counts'))
+#we then replace the original object with the one that has counts
+sce <- sce[, sums > 0]
+sce
+```
+Run DropletUtils::emptyDrops() .
+```{r}
+assay(sce)
+empty_drops <- DropletUtils::emptyDrops(m = assay(sce, 'counts'))
+empty_drops
+
+library(ggplot2)
+plot1 <- ggplot(as.data.frame(empty_drops), aes(x = Total)) +
+  geom_histogram() +
+  scale_x_log10() +
+  scale_y_log10() +
+ geom_vline(xintercept = 100)
+plot1
+
+#we can calculate the number of cells with a Total of more than 100
+sum(empty_drops$Total > 100)
+#this detects 1365 cells
+
+#another method using the FDR
+is.cell <- empty_drops$FDR <= 0.01
+sum(is.cell, na.rm=TRUE)
+#it detects 1205 cells at a FDR of <=0.01
+#as this is a machine learning algorithm, we get slightly different results
+
+#if we wanted to generate an elbow plot, we need this
+#the rank function ranks cells from the highest to the lowest total count and adds it to empty_drops (in a new rank column)
+empty_drops$Rank <- rank(-empty_drops$Total)
+empty_drops
+
+#we can now plot the rank on the x-axis and the Total on the y-axis
+plot2 <- ggplot(as.data.frame(empty_drops), aes(x = Rank, y = Total)) +
+  geom_point() +
+  scale_x_log10() +
+  scale_y_log10() +
+ geom_hline(yintercept = 100)
+plot2
+#we can use 100 as a cutoff
+```
+Remove empty droplets from the data sets.
+```{r}
+#We can use which to exclude NA and FALSE values; TRUE is when FDR <= 0.01
+which(is.cell)
+
+#we now want to remove empty droplets from the data set using subsetting for the columns
+sce <- sce[, which(is.cell)]
+sce
+#this sce object now only contains 1205 cells
+```
+Doublets. Continue using the data set after excluding empty droplets. Run scDblFinder.::scDblFinder().
+```{r}
+library(scDblFinder)
+sce <- scDblFinder::scDblFinder(sce)
+#it tells us that (for some reason) 5000 artificial doublets were used, 15 doublets were called
+#we can have a look at the new object:
+table(rowData(sce)$scDblFinder.selected)
+#this tells us that 32538 are FALSE, 1000 TRUE (this is the default of scDblFinder)
+colData(sce)$scDblFinder.originAmbiguous
+colData(sce)$scDblFinder.class
+```
+One version to plot is plotDoubletMap
+```{r}
+plotDoubletMap(sce)
+```
+Remove doublets from the data sets.
+```{r}
+#we create a new thing called is.doublet, subsetting it based on the scDblFinder.Class column, which says "singlet" for singlets and "doublets" for doublets 
+is.doublet <- colData(sce)$scDblFinder.class
+table(is.doublet)
+
+#we are then removing the doublets from the object
+sce <- sce[, is.doublet == "singlet"]
+sce
+#the object retains everything that doesn't contain 
+```
+Ambient RNA. Run celda::decontX().
+```{r}
+library(celda)
+sce <- decontX(sce)
+colData(sce)
+
+#we can visualise the percentage of contamination
+plotDecontXContamination(sce)
+
+table(colData(sce)$decontX_clusters)
+```
+

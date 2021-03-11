@@ -1,0 +1,258 @@
+---
+title: "Bioconductor single cell"
+author: "Bjorn"
+date: "09/03/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+1. Import the filtered matrix into R; use DropletUtils. What can you tell about the raw data?
+```{r}
+library(DropletUtils)
+pbmc <- read10xCounts(samples = c('pbmc1k' = "data/filtered_feature_bc_matrix"))
+#you can use 'pbmc1k' to assign a name to the sample, which is then shown in the table
+
+#we can have a look at it using print() and multiple other commands
+print(pbmc)
+assays(pbmc)$counts
+colData(pbmc)
+metadata(pbmc)
+```
+We can use this to change the names of the rownames to the actual symbol (but I haven't run it)
+```{r}
+rownames(pbmc) <- rowData(pbmc)$Symbol
+```
+
+2. Compute and visualise quality control metrics; use scater. Would you remove any cell?
+```{r}
+library(scater)
+library(ggplot2)
+
+#We try perCellQCMetrics() here
+qc_cell <- perCellQCMetrics(pbmc)
+#we can then have a look at the object
+print(qc_cell)
+#sum is the total number of reads per cell, and detected is the number of individual genes detected
+head(qc_cell$sum, n = 10)
+
+```
+
+
+```{r}
+#ggplot can't work with the object, so we need to convert it into a dataframe, so it's happy
+#we first plot the percentage coming from the top 50 genes detected
+plot1 <- ggplot(as.data.frame(qc_cell), aes(x = percent_top_50)) +
+    geom_histogram()
+plot1
+
+#
+plot2 <- ggplot(as.data.frame(qc_cell), aes(x = sum, y = percent_top_50)) + 
+    geom_point() +
+    geom_vline(xintercept = 2000) +
+    geom_hline(yintercept = 60)
+plot2
+
+plot3 <- ggplot(as.data.frame(qc_cell), aes(x = sum, y = detected, colour = percent_top_50)) + 
+    geom_point()
+plot3
+
+
+```
+We also want to use addPerCellQC, which we can use to overwrite the pbmc object rather than just obtaining them using perCellQCMetrics
+```{r}
+pbmc <- addPerCellQC(pbmc)
+pbmc
+colData(pbmc)
+```
+
+We now also want to identify mitochondrial genes
+```{r}
+rowData(pbmc) 
+#we search for mitochondrial genes in the thing, here are two different ways
+grep("^MT-", rowData(pbmc)$Symbol)
+mt_gene <- grep("^MT-", rowData(pbmc)[, 'Symbol'])
+mt_gene
+```
+
+We now add quality metrics for the mitochondrial genes.
+```{r}
+pbmc <- addPerCellQC(pbmc, subsets = list(MT = mt_gene))
+pbmc
+colData(pbmc)
+
+plot4 <- ggplot(as.data.frame(colData(pbmc)), aes(sum, detected, colour = subsets_MT_percent)) +
+    geom_point()
+plot4
+```
+
+3. Convert the counts into normalized expression values to eliminate cell-specifc biases (e.g., in capture
+effciency); use scater and/or scran.
+```{r}
+library(scran)
+
+pbmc <- logNormCounts(pbmc)
+assayNames(pbmc)
+assay(pbmc, "logcounts")
+colData(pbmc)
+pbmc
+
+#we can use sizeFactors to access the sizeFactors of the object after logNormCounts
+sizeFactors(pbmc)
+head(sizeFactors(pbmc))
+
+#scran has computeSumFactors()
+```
+
+We can also plot the variance against the mean of each gene
+```{r}
+dec.pbmc <- modelGeneVar(pbmc)
+dec.pbmc
+
+# Visualizing the fit:
+fit.pbmc <- metadata(dec.pbmc)
+fit.pbmc
+plot(fit.pbmc$mean, fit.pbmc$var, xlab="Mean of log-expression",
+    ylab="Variance of log-expression")
+curve(fit.pbmc$trend(x), col="dodgerblue", add=TRUE, lwd=2)
+#this shows that the data are not optimal, but this is what it is, and we'll continue working with it as it is
+```
+We can also calcuakte the means and variance ourselves (Kevin did some magic here).
+```{r}
+df <- data.frame(
+    var = rowVars(as.matrix(assay(pbmc, "logcounts"))),
+    mean = rowMeans(as.matrix(assay(pbmc, "logcounts")))
+)
+ggplot(df, aes(mean, var)) +
+    geom_point() +
+    geom_smooth(colour = "blue", method = "loess", formula = y ~ x) +
+    theme_bw()
+#the fit line doesn't work properly
+```
+4. Select features for downstream analyses, e.g. highly variable genes; use scran
+```{r}
+#this is what we did before
+dec <- modelGeneVar(pbmc)
+dec
+#this is getting back a data frame
+```
+We can now plot the three kinds of variances
+```{r}
+ggplot()+
+geom_point(aes(mean, total), as.data.frame(dec.pbmc), color = "black") +
+geom_point(aes(mean, tech), as.data.frame(dec.pbmc), color = "red") +
+geom_point(aes(mean, bio), as.data.frame(dec.pbmc), color = "blue") +
+geom_hline(yintercept = 0, linetype = "dashed", size = 1, color = "green")
+
+#this is to confirm that the total variance is the sum of the technical and biological variance
+hist(dec$total - (dec$tech + dec$bio), breaks = 1000)
+#
+```
+We now want to identify the highly variable genes.
+```{r}
+hvgs <- getTopHVGs(dec, var.threshold = 0.05, fdr.threshold = 0.05)
+length(hvgs)
+hvgs
+#this gives us many different samples, so we'll make a selection, which we can specify in above getTopHVGs() command
+
+
+```
+
+```{r}
+dec$gene_id <- rownames(dec)
+ggplot() +
+    geom_point(aes(mean, bio, colour = gene_id %in% hvgs), as.data.frame(dec)) +
+    geom_hline(yintercept = 0, linetype = "dashed", size = 1, colour = "green")
+```
+
+```{r}
+hist(subset(dec, bio > 0.25)[, "FDR"])
+```
+
+We now run PCA and then plot an elbow plot.
+```{r}
+pbmc <- runPCA(pbmc, subset_row = hvgs)
+pbmc
+#the output is stored in the reduced dimensions(reducedDim)
+#we can now try plotting the elbow plot
+df <- data.frame(
+    var = attr(reducedDim(pbmc, "PCA"), "percentVar"),
+    PC = seq_along(attr(reducedDim(pbmc, "PCA"), "percentVar"))
+)
+
+ggplot(df, aes(PC, var)) +
+    geom_point()
+ggplot(df, aes(PC, var)) +
+    geom_point() +
+    scale_y_log10() 
+```
+
+We also run UMAP now
+```{r}
+pbmc <- runUMAP(pbmc, dimred = "PCA", n_dimred = 20)
+pbmc
+```
+
+
+```{r}
+# reducedDim(pbmc, "PCA")
+# reducedDim(pbmc, "UMAP")
+#this can be plotted using ggplot (again, Kevin did some magic)
+df <- as.data.frame(cbind(
+reducedDim(pbmc, "UMAP"),
+colData(pbmc)[, "sizeFactor"]
+))
+# head(df)
+colnames(df) <- c("UMAP_1", "UMAP_2", "sizeFactor")
+ggplot(df, aes(UMAP_1, UMAP_2, color = sizeFactor)) +
+geom_point()
+#or one uses plotReducedDim for it
+plotReducedDim(pbmc, dimred = "UMAP", colour_by = "sizeFactor")
+```
+Another method to plot things.
+```{r}
+scater::plotReducedDim(pbmc, dimred = "UMAP", colour_by = "S100A9")
+```
+
+6. Cluster cells; use scran.
+```{r}
+
+#we can use this to cluster cells using different numbers of PCs
+#the output is a table that compares the number of PCs with the number of clusters
+output <- scran::getClusteredPCs(reducedDim(pbmc, "PCA"))
+output
+#we can extract what the programme is suggesting to us
+metadata(output)$chosen
+
+#we can also plot this, the output also tells us that 20 principal components are optimal
+ggplot(as.data.frame(output), aes(n.pcs, n.clusters)) + geom_point() + geom_line()
+
+#we now set the numbers of PC dimensions that we have decided on (20) and then build the graph
+pbmc <- runPCA(pbmc, subset_row = hvgs, ncomponents = 20)
+dim(reducedDim(pbmc, "PCA"))
+g <- buildSNNGraph(pbmc, use.dimred = "PCA")
+head(reducedDim(pbmc, "PCA"))
+#g tells us that cell 1 is connected to cell 2, and cell 3 and so on
+g
+cluster_result <- igraph::cluster_walktrap(g)
+table(cluster_result$membership)
+
+colLabels(pbmc) <- factor(cluster_result$membership)
+
+plotUMAP(pbmc, colour_by = "label")
+```
+7. Identify markers for each cluster; use scran.
+```{r}
+out <- scran::findMarkers(pbmc, groups = pbmc$label, test.type = "wilcox")
+str(out)
+out[[1]]
+#you can access the clusters using this:
+head(rownames(out[[6]]), 20)
+#you can also plot individual genes in the clusters using:
+plotUMAP(pbmc, colour_by = "S100A8")
+#You can also plot the expression of individual genes in the different clusters
+plotExpression(pbmc, features=c("S100A4", "TRAC"), x = "label", colour_by = "label")
+```
+

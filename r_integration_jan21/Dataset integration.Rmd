@@ -1,0 +1,212 @@
+---
+title: "single cell integration"
+author: "Bjorn"
+date: "11/03/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+1. Import the two RDS files into R
+```{r}
+library(Seurat)
+pbmcv2 <- readRDS("data/pbmcv2_filtered.rds")
+pbmcv3 <- readRDS("data/pbmcv3_filtered.rds")
+#v2 was generated using the older version 2
+#v3 is the newer version
+#these files have already been filtered
+```
+
+2. Create a merged Seurat object containing both sets of data
+```{r}
+pbmc.combined <- merge(x = pbmcv2, y = pbmcv3, add.cell.ids = c("v2", "v3"), project = "PBMC")
+pbmc.combined
+#this has 15413 genes across 1637 samples
+```
+
+3. On the merged Seurat object, perform the general steps of a Seurat analysis workflow:
+We will use SCTransform to perform three steps (normalise, find variable features, and scaling it in one go)
+```{r}
+pbmc.combined <- SCTransform(pbmc.combined, vars.to.regress = "percent.mt", verbose = FALSE)
+```
+```{r}
+VlnPlot(pbmc.combined, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.1)
+#there is a substantial difference between v2 and v3 in terms of features, counts and mt percentage
+```
+We can also compare ncount_RNA vs percent.mt - both datasets also look quite different here.
+```{r}
+FeatureScatter(pbmc, feature1 = "nCount_RNA", feature2 = "percent.mt")
+```
+
+PCA
+```{r}
+DefaultAssay(pbmc)
+pbmc.combined <- RunPCA(pbmc.combined, npcs = 50)
+```
+We can visualise the PCA results
+```{r}
+VizDimLoadings(pbmc.combined, dims = 1:2, reduction = "pca")
+DimPlot(pbmc.combined, reduction = "pca")
+ElbowPlot(pbmc.combined, ndims = 50)
+#it looks like 20 pcs might be a good idea
+```
+Now we want to cluster the cells, using 20 dimensions.
+```{r}
+#FindNeighbors is creating the graph of neighbours
+pbmc.combined <- FindNeighbors(pbmc.combined, dims = 1:20, k.param = 20)
+#FindClusters then splits up the graph
+pbmc.combined <- FindClusters(pbmc.combined, resolution = 0.5)
+#this uses the Louvain algorithm
+```
+
+```{r}
+pbmc.combined <- RunUMAP(pbmc.combined, dims = 1:20)
+
+DimPlot(pbmc.combined, reduction = "umap", label = FALSE, group.by = "orig.ident")
+
+FeaturePlot(pbmc.combined, features = c("MS4A1", "GNLY", "CD3E", "CD14", "FCER1A", "FCGR3A", "LYZ", "PPBP", 
+    "CD8A")) 
+```
+We can also try clustering using different parameters.
+```{r}
+pbmc.combined <- FindClusters(pbmc.combined, resolution = seq(0, 1, .1))
+```
+We can aso try using the Clustree
+```{r}
+library(clustree)
+clustree(pbmc.combined)
+#each row is one resolution, each dot represents a cluster
+#with 0 resolution, it finds 3 clusters, with 0.1 resolution 6 clusters, and so on
+#it also shows arrows where clusters are "unstable" and move between different resolutions
+#this helps to choose the optimal resolution, as you want to avoid seeing many "unstable" clusters
+```
+We have seen a clear batch effect, so we want to use the Seurat integration approach (NB: we use the vignette for version 3)
+We will start by performing SCTransform on both files (= Seurat objects) separately. These are the original files we read in rather than the combined Seurat object.
+```{r}
+pbmcv2 <- SCTransform(pbmcv2, vars.to.regress = "percent.mt", verbose = FALSE)
+pbmcv3 <- SCTransform(pbmcv3, vars.to.regress = "percent.mt", verbose = FALSE)
+```
+
+We check the default assay, which is SCT.
+```{r}
+DefaultAssay(pbmcv3)
+```
+
+We then want to select features that are common between both data sets.
+```{r}
+#We first make a list of two different Seurat objects
+pbmc.list = list(pbmcv2, pbmcv3)
+#then we use this list for the SelectIntegrationFeatures, it will give us 3000 features that are variable in both data sets (3000 is the standard for SCTransform)
+pbmc.features <- SelectIntegrationFeatures(object.list = pbmc.list, nfeatures = 3000)
+#it outputs a character vector (3000) with the gene names
+
+#we need two variables that contain the variable features from each data set
+pbmcv2_features <- VariableFeatures(pbmcv2)
+pbmcv3_features <- VariableFeatures(pbmcv3)
+
+#we can calculate the overlap using intersect(), length of it outputs the number of overlapping genes
+length(intersect(pbmcv2_features, pbmcv3_features))
+#this tells us that there is 1421 overlapping genes between both data sets
+
+```
+
+We can use a venn diagram to visualise the overlap
+```{r}
+library(VennDiagram)
+venn <- venn.diagram(x = list(pbmcv2_features, pbmcv3_features), 
+             category.names = c("pbmcv2", "pbmcv3"), filename = NULL,
+             output = TRUE)
+grid.draw(venn)
+```
+
+We now Use the PrepSCTIntegration, which is a preparation function for the actual integration. 
+```{r}
+pbmc.list <- PrepSCTIntegration(object.list = pbmc.list, anchor.features = pbmc.features)
+
+#check if rownames in both objects are the same
+rownames_pbmcv2 <- row.names(GetAssayData(object = pbmc.list[[1]], slot = "scale.data"))
+rownames_pbmcv3 <- row.names(GetAssayData(object = pbmc.list[[2]], slot = "scale.data"))
+length(intersect(rownames_pbmcv2, rownames_pbmcv3))
+identical(rownames_pbmcv2, rownames_pbmcv3)
+#Yes, they are
+```
+
+Next, identify anchors and integrate the datasets.
+```{r}
+#we now find pairs of cells and scores between them = anchors
+#we can play with the dimensions here to optimise the integration
+pbmc.anchors <- FindIntegrationAnchors(object.list = pbmc.list, normalization.method = "SCT", 
+    anchor.features = pbmc.features, verbose = FALSE, dims = 1:30)
+
+overlapping_featuresv2 <- rownames(pbmc.list[[1]])
+overlapping_featuresv3 <- rownames(pbmc.list[[2]])
+
+#we then perform the actual integration, we should use the same dimensions as in the comment above
+pbmc.integrated <- IntegrateData(anchorset = pbmc.anchors, normalization.method = "SCT", 
+    verbose = FALSE, dims = 1:30, features.to.integrate = intersect(overlapping_featuresv2, overlapping_featuresv3))
+```
+Now that we have one data set again (after integration), we have to run the same steps again as before (PCA, etc...)
+```{r}
+DefaultAssay(pbmc.integrated)
+#the default assay that we want to use is integrated
+pbmc.integrated <- RunPCA(pbmc.integrated, npcs = 50, verbose = FALSE)
+
+#we can then run an elbow plot to visualise the results
+ElbowPlot(pbmc.combined, ndims = 50)
+#20 looks like a good number of PCS to go with
+
+#we then want to run the UMAP
+pbmc.integrated <- RunUMAP(pbmc.integrated, verbose = FALSE, dims = 1:20)
+
+#as before, we find the information about the data set identity of the cells in the metadata, which we can access using:
+View(pbmc.integrated[[]])
+#We can then visualise the results
+DimPlot(pbmc.integrated, reduction = "umap", label = FALSE, group.by = "orig.ident")
+```
+
+We then want to find neighbours and clusters again.
+```{r}
+pbmc.integrated <- FindNeighbors(pbmc.integrated, dims = 1:20, k.param = 20)
+
+pbmc.integrated <- FindClusters(pbmc.integrated, resolution = 0.5)
+
+#we can check that both pca and umap have been applied
+Reductions(pbmc.integrated)
+
+DimPlot(pbmc.integrated, reduction = "umap", label = TRUE)
+
+FeaturePlot(pbmc.integrated, features = c("MS4A1", "GNLY", "CD3E", "CD14", "FCER1A", "FCGR3A", "LYZ", "PPBP", 
+    "CD8A")) 
+```
+
+We can also try using a different algorithm, such as Leiden (number 4 in FindClusters)
+At this point it wanted a python environment and I didn't get it to work, so I just gave up
+```{r}
+library(leiden)
+leiden_pbmc.combined <- FindClusters(pbmc.integrated, resolution = 0.5, algorithm = 4)
+
+#the code would have been this:
+pbmc_integrated <- FindClusters(pbmc_integrated, resolution = 0.8, algorithm = 4) # clustering with Leiden
+colnames(pbmc_integrated@meta.data)[10] <- "Leiden_0.8" #changing the name of the metadata column with the Leiden clustering
+
+pbmc_integrated <- FindClusters(pbmc_integrated, resolution = 0.8) # clustering with Louvain at the same resolution
+View(pbmc_integrated[[]])
+
+DimPlot(pbmc_integrated, reduction = "umap", label=TRUE, group.by="Leiden_0.8")
+DimPlot(pbmc_integrated, reduction = "umap", label=TRUE, group.by="integrated_snn_res.0.8")
+```
+
+As a last step, we want to find differentially expressed genes between clusters
+```{r}
+#Cave: this wants raw data and not corrected data, so we have to use the original RNA assay
+DefaultAssay(pbmc.integrated) <- "RNA"
+DefaultAssay(pbmc.integrated)
+
+#we use the MAST method
+library(MAST)
+FindAllMarkers(pbmc.integrated, test.use = "MAST", latent.vars = "orig.ident")
+
+```
+

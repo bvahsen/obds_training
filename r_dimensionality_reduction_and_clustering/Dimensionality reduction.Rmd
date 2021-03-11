@@ -1,0 +1,209 @@
+---
+title: "Dimensionality reduction"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Import the matrix data from the file logcounts.csv. This is using Base R.
+```{r}
+logcounts <- read.csv("data/logcounts.csv", row.names = 1)
+head(logcounts)
+```
+
+1. Inspect the structure of the file
+```{r}
+str(logcounts)
+```
+
+R has imported this as a dataframe, we now want to convert it into a matrix. We want this because PCA is a numerical operation that by default works on a matrix. We check using str() again that we have successfully converted it. For PCA we do not need 'tidy' data.
+```{r}
+logcounts_matrix <- data.matrix(logcounts, rownames.force = NA)
+View(logcounts_matrix)
+str(logcounts_matrix)
+```
+
+2. Perform PCA. Inspect the structure of the output. (This is NOT what we want, but it is for understanding purposes)
+```{r}
+logcounts.pca <- prcomp(logcounts_matrix, center = TRUE, scale. = FALSE)
+str(logcounts.pca)
+```
+
+This outputs rows = cells, columns = principal components. This is NOT what we want. We want each row to be a Gene, so the comparison in the PCA makes sense. Therefore we first transpose the original matrix and then run the PCA again.
+
+```{r}
+transposed_logcounts <- t(logcounts_matrix)
+str(transposed_logcounts)
+```
+```{r}
+transposed_logcounts.pca <- prcomp(transposed_logcounts, center = TRUE, scale. = FALSE)
+str(transposed_logcounts.pca)
+#scaling is usually set to false, and center to true
+```
+Now the rotation has GeneID and PC1, 2, so this is what we want. The $x gives the coordinates of each cell relative to each PC1, PC2, etc.
+We can check $x using View().
+```{r}
+View(transposed_logcounts.pca$x)
+```
+For example, the first cell (Cell_201202) has the coordinates -48.9 compared to PC1 and -.03 to PC2. 
+
+```{r}
+View(transposed_logcounts.pca)
+```
+
+This contains one piece of info per column.
+
+Draw a scatter plot of the top two principal components and color by various experimental metadata in cell_metadata.csv . Which experimental factors show the largest variance in the data?
+First the data in the transposed_logcounts.pca matrix needs to be in 'tidy' format.
+```{r}
+library(tidyverse)
+logcounts_pca_scores <- (transposed_logcounts.pca$x)
+View(logcounts_pca_scores)
+```
+
+Now select the first two columns
+```{r}
+two_columns <- logcounts_pca_scores[ , 1:2]
+View(two_columns)
+```
+
+In this data, the cell IDs are the row names. To merge with cell_metadata, the cell IDs need to be separate column. We need to specify what the new colum name will be. We also want to join it in the same command using full_join.
+```{r}
+cell_metadata <- read.csv("data/cell_metadata.csv")
+exercise3 <- as.data.frame(two_columns) %>% 
+    rownames_to_column(var = 'Sample') %>%
+    full_join(cell_metadata)
+View(exercise3)
+```
+
+Now we also want to plot it using ggplot. Draw a scatter plot of the top two principal components and color by various experimental metadata.
+```{r}
+plot1 <- ggplot(exercise3, aes(x = PC1, y = PC2)) + 
+    geom_point()
+plot1
+```
+Now we colour by "Status".
+```{r}
+plot2 <- ggplot(exercise3, aes(x = PC1, y = PC2, colour = Status)) + 
+    geom_point()
+plot2
+```
+
+Now we also add shape = Infection.
+```{r}
+plot3 <- ggplot(exercise3, aes(x = PC1, y = PC2, colour = Status, shape = Infection)) + 
+    geom_point()
+plot3
+```
+As this is not easy to interpret, we can plot them next to each other. We do this using cowplot.
+
+```{r}
+plot4 <- ggplot(exercise3, aes(x = PC1, y = PC2, colour = Infection)) + 
+    geom_point()
+plot5 <- ggplot(exercise3, aes(x = PC1, y = PC2, colour = Status)) + 
+    geom_point()
+plot6 <- ggplot(exercise3, aes(x = PC1, y = PC2, colour = Time)) + 
+    geom_point()
+library(cowplot)
+plot_grid(plot4, plot5, plot6, labels = c("A", "B", "C"), ncol = 1, nrow = 3)
+```
+We now want to draw a density plot, faceted by time and infection, colored by status, to inspect the variance of each
+experimental factor on the top principal component. This can tell us where the majority of plots is located.
+```{r}
+plot7 <- ggplot(exercise3, aes(x = PC1, colour = Status)) + 
+    geom_density() +
+    facet_grid(Infection ~ Time)
+plot7    
+```
+That means there is basically no difference in PC1 between exposed and infected cells.
+
+Draw a bar plot of variance explained by each principal component. How many principal components
+would you keep for downstream analyses?
+```{r}
+variance_table <- data.frame(variance = (transposed_logcounts.pca$sdev)^2)
+variance_table$fraction <- variance_table$variance/sum(variance_table$variance)
+PC_numbers <- seq(1,nrow(variance_table))
+variance_table$PC <- PC_numbers
+variance_table <- variance_table %>% 
+    select(PC, variance, fraction)
+View(variance_table)
+
+plot8 <- ggplot(variance_table, aes(x = PC, y = fraction)) +
+    geom_col() +
+    xlim(0, 15)
+plot8
+#
+```
+
+Draw a bar plot of variance explained by each principal component. How many principal components
+would you keep for downstream analyses?
+```{r}
+variance_table$cum_sum <- cumsum(variance_table$fraction)
+#View(variance_table)
+
+plot9 <- ggplot(variance_table, aes(x = PC, y = cum_sum)) +
+    geom_line() +
+    xlim(0, 100)
+plot9
+```
+
+Find the names of the top genes associated with the top principal components.
+```{r}
+genes_influence <- as.data.frame(transposed_logcounts.pca$rotation)
+#now we'll create a new column that contains the gene IDs
+genes_influence$gene_ID <- rownames(genes_influence)
+
+temp <- genes_influence %>%
+    arrange(desc(PC1)) %>%
+    select(gene_ID, PC1)
+View(temp)
+
+#the name of the top gene is: ENSG00000172183 = interferon stimulated exonuclease gene 20
+```
+
+Visualise the gene expression value of the gene with the highest loading for PC1 as color on a scatter
+plot of PC1 and PC2. What do you observe?
+```{r}
+#we already have a table which we can recycle that contains the counts for the genes
+ENSG00000172183 <- as.numeric(logcounts["ENSG00000172183", ])
+ENSG00000172183
+
+exercise3$ENSG00000172183 <- ENSG00000172183
+View(exercise3)
+
+plot10  <- ggplot(exercise3, aes (x = PC1, y = PC2, col = ENSG00000172183)) +
+    geom_point()
+
+plot10
+#Answer: this gene has high expression for high PC1 values, and low expression for low PC1 values. (Need to find out what that actually means)
+```
+
+Compare PCA to t-SNE to UMAP. Note that t-SNE and UMAP should be given the subset of principal components selected above.
+```{r}
+library(umap)
+
+subset_logcounts.pca <- transposed_logcounts.pca$x[, 1:15]
+#View(subset_logcounts.pca)
+
+View(subset_logcounts.pca)
+View(cell_metadata)
+
+logcounts_umap <- umap(subset_logcounts.pca)
+logcounts_umap_layout <- as.data.frame(logcounts_umap$layout)
+logcounts_umap_layout$Sample <- rownames(logcounts_umap_layout)
+View(logcounts_umap_layout)
+
+logcounts_umap_layout_metadata <- logcounts_umap_layout %>%
+full_join(cell_metadata)
+View(logcounts_umap_layout_metadata)
+
+plot11 <- ggplot(logcounts_umap_layout_metadata, aes(x = V1, y = V2, col = Time)) +
+geom_point()
+
+plot11
+
+```
+
+

@@ -1,0 +1,239 @@
+---
+title: "DeSeq2"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Activate tidyverse first.
+```{r}
+library(tidyverse)
+library(DESeq2) 
+```
+
+1. Convert the counts table (obds_countstable.tsv.gz) and the sample information table (obds_sampletable.tsv) into a suitable format for
+generating a DESeqDataSet object
+- Set Egr2/3 DKO CD8 cells as the reference level
+```{r}
+getwd()
+#we read in the table, letting it know that the headers exist, we give the first column of the table as row names
+counts_table <- read.table("data/obds_countstable.tsv.gz", header = TRUE, row.names = 1)
+#important to use '\t' here, so it doesnt split Mus musculus into two columns
+sample_table <- read.table("data/obds_sampletable.tsv", header = TRUE, row.names = 1, sep = '\t')
+```
+
+We should convert the counts_table into a matrix, because this is required by DESeq2
+Usage for DeSeqDataSetFromMatrix: (countData, colData, design, tidy = FALSE, ignoreRank = FALSE, ...)
+```{r}
+counts_table <- as.matrix(counts_table)
+#the colData argument of the DeSeqDataSetFromMatrix wants the Rows of colData(here sample_table) correspond to columns of countData (counts_table), so we've already got this and all is fine, we don't need to transpose
+```
+
+As we want to set Egr2/3 DKO CD8 cells as the reference level, we need to optimise the layout of the table in sample_table, so we split into 4 columns and then remerge them using unite again.
+```{r}
+sample_table <- sample_table %>% separate(sample_title,  into = c("egr", "ko", "cell", "replicate"), sep = "_") %>%
+    unite(col = "egr_ko_cell", egr, ko, cell, sep = "_")
+#this way we can use egr_ko_cell as the input for design in the DeSeqDataSetFromMatrix
+
+```
+
+We ned to make the column egr_ko_cell in sample_table into a factor and set the levels. This can be done using factor. This way we can set the Egr2/3_DKO_CD8 as control and then compare the other conditions with it. This doesn't change the layout of the table but is required for DESeq2. 
+```{r}
+sample_table$egr_ko_cell <- factor(sample_table$egr_ko_cell, levels = c("Egr2/3_DKO_CD8", "Egr2/3_DKO_CD4", "Egr2_Kin_CD8", "Egr2_Kin_CD4"))
+```
+
+Generate a DESeqDataSet object named dds. Nb: we use egr_ko_cell as condition to compare, that's why we put it after the tilde.
+```{r}
+dds <- DESeqDataSetFromMatrix(counts_table, sample_table, ~ egr_ko_cell)
+#this is complaining that the levels of factors in design (i.e.~ egr_ko_cell) have characters other than letters, numbers, '_', and '.'. This is not necessarily an issue though, it deals with it itself.
+```
+
+Access the design formula, counts matrix and sample information from dds. 
+```{r}
+assays(dds)
+#output: List of length 1, that means we currently only have a counts matrix, which we can access below
+#design formula
+design(dds)
+#counts matrix - three different ways to access it and do the same
+head(assays(dds)$counts)
+head(assay(dds, "counts"))
+head(counts(dds))
+#sample information
+colData(dds)
+```
+
+Calculate the size factors for each sample – estimateSizeFactors(). We give the info back to the same object (it doesnt need a new object, just adds information to the already existing one)
+- Access the size factors from the dds object
+
+```{r}
+#we don't need to provide any other info, the other functions have default settings
+#this is where we are normalising for library size, RNA composition etc. 
+dds <- estimateSizeFactors(dds)
+sizeFactors(dds)
+```
+
+- Generate a bar plot of the size factors for each sample, coloured by condition/group
+```{r}
+library(ggplot2)
+#we can check what the samples look like in colData(dds)
+#First we need to make a new data table where we add in the information that we want to plot
+plot_table <- data.frame(sample = row.names(colData(dds)), 
+                         size_factors = sizeFactors(dds), 
+                         condition = colData(dds)$egr_ko_cell)
+#then we plot using the table
+plot1 <- ggplot(plot_table, aes(x = sample, y = size_factors, fill = condition)) +
+    geom_col() +
+    theme(axis.text.x = element_text(angle = 60, hjust = 1))
+plot1
+```
+6. Obtain dispersion estimates for each gene – estimateDispersions()
+- Plot the per-gene dispersion estimates (DESeq2 has a helper function for
+this)
+```{r}
+dds <- estimateDispersions(dds)
+dispersions(dds)
+plotDispEsts(dds)
+```
+
+7. Perform the Wald test
+```{r}
+dds <- nbinomWaldTest(dds)
+```
+
+8. Use the DESeq() function to perform steps 5-7 in one go. This runs all of them in one go.
+```{r}
+#to have a fresh thing to work with, we need to run this (from above) again
+dds <- DESeqDataSetFromMatrix(counts_table, sample_table, ~ egr_ko_cell)
+dds <- DESeq(dds)
+```
+
+9. Access the coefficients of the NB GLM
+```{r}
+coef_output <- coef(dds)
+View(coef_output)
+```
+
+10.Access the results table for the comparison between CD8+ and CD4+ T cells from Egr2/3 DKO mice
+- Table should contain log2 fold changes and p-values for all genes
+```{r}
+
+results <- results(dds, contrast = c("egr_ko_cell", "Egr2/3_DKO_CD8", "Egr2/3_DKO_CD4"))
+results <- as.data.frame(results)
+head(results)
+
+```
+
+11. Plot a histogram of the raw and BH-adjusted p-values – do they look as expected?
+```{r}
+plot2 <- ggplot(results, aes(x = pvalue)) +
+    geom_histogram()
+plot3 <- ggplot(results, aes(x = padj)) +
+    geom_histogram()
+library(cowplot)
+plot_grid(plot2, plot3, labels = c("A", "B"), ncol = 2, nrow = 1)
+
+
+```
+
+12. Generate an MA plot of the log2 FC values for all genes
+```{r}
+#this doesn't want a dataframe, so we'll need to run it again
+results <- results(dds, contrast = c("egr_ko_cell", "Egr2/3_DKO_CD8", "Egr2/3_DKO_CD4"))
+plot4 <- plotMA(results)
+plot4
+```
+
+13. Shrink the log2 FC values using the normal, apeglm and ashr methods
+```{r}
+normal <- lfcShrink(dds, coef = 2, type = "normal")
+apeglm <- lfcShrink(dds, coef = 2, type = "apeglm")
+ashr <- lfcShrink(dds, coef = 2, type = "ashr")
+```
+
+14. Generate MA plots of the shrunken log2 FC values – compare methods
+```{r}
+#we need to use recordPlot here because otherwise for some reason it will not plot it as a grid
+plotMA(results)
+plot4 <- recordPlot()
+
+plotMA(normal)
+plot5 <- recordPlot()
+
+plotMA(apeglm)
+plot6 <- recordPlot()
+
+plotMA(ashr)
+plot7 <- recordPlot()
+
+plot_grid(plot4, plot5, plot6, plot7, labels = c("results", "normal", "apeglm", "ashr"), ncol = 2, nrow = 2)
+```
+
+15. Generate a results table (one shrinkage method) containing mgi symbols
+- Use the org.Mm.eg.db package
+- Remove all genes with a padj of NA
+- How many Ensembl IDs are not assigned an mgi symbol and how many mgi symbols are duplicated?
+```{r}
+#the org.Mm.eg.db package is already provided in this environment
+library(org.Mm.eg.db)
+#essentially we want to add the gene names to the results table
+#the shrink function already runs results, so we don't need to run this again
+#we can extract the results using conversion into a dataframe
+apeglm <- as.data.frame(apeglm)
+
+#we can filter out NA values using filter
+apeglm <- apeglm %>% 
+    dplyr::filter(!is.na(padj))
+
+#we can now use mapids from org.Mm.eg.db
+#x is the package that we loaded
+#keys are the row names in the apeglm file (= ENSEMBL name)
+#you can use keytypes(org.Mm.eg.db) to find the keytype, in this case we want ENSEMBL, which is the type of key we are providing
+#column is what we want to retrieve, in this case the gene SYMBOL
+mapids <- mapIds(x = org.Mm.eg.db, keys = row.names(apeglm), column = "SYMBOL", keytype = "ENSEMBL")
+
+
+```
+We then want to make it into a data frame
+```{r}
+mapids <- as.data.frame(mapids)
+
+#now we want to make a new column in the original data frame as well as in the mapids
+apeglm$ENSEMBL_ID <- row.names(apeglm)
+mapids$ENSEMBL_ID <- row.names(apeglm)
+
+#and then we can join them together
+merged_table <- mapids %>% left_join(apeglm, by = "ENSEMBL_ID")
+```
+
+
+16. Write the results table to a CSV file
+```{r}
+merged_table <- merged_table[ ,-c(3,5:6)]
+write.csv(merged_table, file = "KO_CD8_vs_KO_CD4.csv")
+```
+
+17. Filter the results table for padj < 0.05 and absolute log2 FC > 1, and write to a CSV file
+```{r}
+filtered_table <- (merged_table[merged_table$padj < 0.05 & merged_table$log2FoldChange > 1, ])
+write.csv(filtered_table, file = "filtered_KO_CD8_vs_KO_CD4.csv")
+```
+
+18. Generate VST and rlog transformed counts: Plot the relationship between the mean expression and the sd of all genes
+– fit a trend line
+```{r}
+
+```
+
+19. Using both sets of transformed counts:
+- Generate a PCA plot either using all genes, or top 500 most variable genes
+- Generate a heatmap of the top 20 (by shrunken FC) differentially-expressed
+genes – label samples by condition and genes by mgi symbol
+- Generate a heatmap of sample-sample correlations
+```{r}
+normal <- as.data.frame(normal)
+results_normal <- results(normal, contrast = c("egr_ko_cell", "Egr2/3_DKO_CD8", "Egr2/3_DKO_CD4"))
+results_normal
+```
+

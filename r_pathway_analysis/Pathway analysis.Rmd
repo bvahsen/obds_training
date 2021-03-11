@@ -1,0 +1,140 @@
+---
+title: "Pathway analysis"
+author: "Bjorn"
+date: "04/03/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Now we want to read in the files.
+```{r}
+#the merged_table is the background data with all genes that have been analysed
+merged_table <- read.csv("data/KO_CD8_vs_KO_CD4.csv", row.names = 1)
+#the filtered table are the overexpressed and statistically significant genes (p < 0.05, log2c > 1)
+filtered_table <- read.csv("data/filtered_KO_CD8_vs_KO_CD4.csv", row.names = 1)
+```
+
+Follow the vignette for your gene set analysis tool(s) of interest!
+We'll start with clusterProfiler (ORA and GSEA).
+```{r}
+#First task will be to convert ENSEMBL into entrez ids
+library(org.Mm.eg.db)
+columns(org.Mm.eg.db) 
+#we assigned the ENSEMBLE_IDs to the row names of the table
+row.names(merged_table) <- merged_table$ENSEMBL_ID
+row.names(filtered_table) <- filtered_table$ENSEMBL_ID
+
+#we then retrieved the Entrez Ids for the ENSEMBL Ids using the mapID function for the merged table
+entrez_id <- mapIds(x = org.Mm.eg.db, keys = row.names(merged_table), column = "ENTREZID", keytype = "ENSEMBL")
+#and made a dataframe of it (unsure if necessary?, at least good to be able to view it)
+entrez_id <- as.data.frame(entrez_id)
+
+#we then make a vector of it with the entries of the entrez_id data frame
+entrez_merged <- as.numeric(entrez_id$entrez_id)
+head(entrez_merged)
+
+#and then we did the same for the filtered table
+entrez_id_filtered <- mapIds(x = org.Mm.eg.db, keys = row.names(filtered_table), column = "ENTREZID", keytype = "ENSEMBL")
+entrez_id_filtered <- as.data.frame(entrez_id_filtered)
+
+entrez_filtered <- as.numeric(entrez_id_filtered$entrez_id_filtered)
+head(entrez_filtered)
+     
+```
+No we want to run GO
+```{r}
+library(clusterProfiler)
+#it takes the filtered genes and compares them with the whole data set to find enriched pathways - for some reason, ossification is highly enriched
+ego <- enrichGO(gene = entrez_filtered, 
+                universe = entrez_merged, 
+                OrgDb = org.Mm.eg.db, 
+                ont = "ALL", 
+                pAdjustMethod = "BH", 
+                pvalueCutoff  = 0.01, 
+                qvalueCutoff  = 0.05, 
+                readable = TRUE)
+head(ego)
+#we can also plot the results using a barplot or a dotplot
+barplot(ego, showCategory=20)
+dotplot(ego, showCategory=20)
+```
+
+Now we'll do the same with KEGG
+```{r}
+#this is similar to enrichGo but it uses a different database, cave: one has to be careful with gene identification (doesn't allow to use the same identifiers), NB: keggpathway has not been updated since 2012, so results are different and less
+
+kegg <- enrichKEGG(gene = entrez_filtered, 
+                   universe = entrez_merged, 
+                   organism = 'mmu',
+                   pvalueCutoff = 0.05,
+                   pAdjustMethod = "BH")
+head(kegg)
+#there are different functions for plotting the output (in the book) - 
+```
+
+Now we'll also perform GSEA-GO
+```{r}
+#for this we'll need a ranked list, for example log2fc at the top and low log2fc below
+#NB: we use the whole list that is ordered by log2fc but includes all genes
+
+#here we want to use the the whole list rather than the filtered table, so we'll use the merged_table
+filtered_sorted_geneList <- merged_table[order(merged_table$log2FoldChange, decreasing = TRUE), ]
+#we can use duplicated to get rid of duplicates
+#which(is.na(filtered_sorted_geneList$mapids))
+filtered_sorted_geneList <- filtered_sorted_geneList[!duplicated(filtered_sorted_geneList$mapids), ]
+#we also get rid of NA values
+filtered_sorted_geneList <- filtered_sorted_geneList[!is.na(filtered_sorted_geneList$mapids), ]
+
+which(is.na(filtered_sorted_geneList$mapids))
+#now we create the geneList that we then use to run gseGO
+filtered_geneList = filtered_sorted_geneList[, 3]
+names(filtered_geneList) = as.character(filtered_sorted_geneList[, 1])
+str(filtered_geneList)
+
+#compares all analysed genes with the organism database (in this case Mus musculus)
+ego3 <- gseGO(geneList = filtered_geneList,
+              keyType = "SYMBOL",
+              OrgDb        = org.Mm.eg.db,
+              ont          = "BP",
+              minGSSize    = 100,
+              maxGSSize    = 500,
+              pvalueCutoff = 0.05,
+              verbose      = FALSE)
+head(ego3)
+```
+
+Let's also plot it using different methods
+```{r}
+dotplot(ego3, showCategory=20)
+gseaplot(ego3, geneSetID = 1)
+```
+
+We can do the same using KEGG GSEA
+```{r}
+#KEGG is not happy with symbols, so we need to convert it into entrez
+#it is the same as GSEA-GO, so it also compares the full gene list with the organism
+
+#we create another table first which includes the Entrez IDs instead of the Ensemble Ids
+kk2_table <- filtered_sorted_geneList
+kk2_table$entrezid <- mapIds(x = org.Mm.eg.db, keys = row.names(filtered_sorted_geneList), column = "ENTREZID", keytype = "ENSEMBL")
+
+
+kk2_geneList = kk2_table[, 3]
+names(kk2_geneList) = as.character(kk2_table[, 5])
+str(kk2_geneList)
+
+kk2 <- gseKEGG(geneList     = kk2_geneList,
+               organism     = 'mmu',
+               pvalueCutoff = 0.05,
+               pAdjustMethod = "BH",
+               verbose      = FALSE)
+head(kk2)
+
+#now we can also plot it
+dotplot(kk2)
+ridgeplot(kk2)
+```
+
